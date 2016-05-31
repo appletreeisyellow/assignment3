@@ -15,6 +15,7 @@ using namespace std;
 #define MIN_DIST 1.0f
 #define MIN_REFLECT_DIST 0.001f
 #define MAX_REFLECTION_DEPTH 3
+#define INITIAL_DISTANCE -1
 
 
 struct Ray
@@ -73,7 +74,7 @@ struct Intersection
     Ray ray;
     float distance;
     vec4 point;
-    bool interiorPoint;
+    bool isInnerPoint;
     Sphere *sphere;
     vec4 normal;
 };
@@ -194,15 +195,6 @@ void loadFile(const char* filename)
         }
         parseLine(vs);
     }
-    /*
-     cout << "g_width " << g_width << endl;
-     cout << "g_height " << g_height << endl;
-     cout << "g_left " << g_left << endl;
-     cout << "g_right " << g_right << endl;
-     cout << "g_top " << g_top << endl;
-     cout << "g_bottom " << g_bottom << endl;
-     cout << "g_near " << g_near << endl;
-     */
 }
 
 
@@ -229,69 +221,72 @@ Intersection getIntersection(Ray& ray)
 {
     Intersection intersection;
     intersection.ray = ray;
-    intersection.distance = -1;
-    intersection.interiorPoint = false;
+    intersection.isInnerPoint = false;
+    //intersection.distance = -1;
+    intersection.distance = INITIAL_DISTANCE;
     
-    for (Sphere &sphere : g_spheres) {
-        vec4 S = sphere.inverseTransform * (sphere.position - ray.origin); // -(O - C)
-        vec4 C = sphere.inverseTransform * ray.dir;
+    for (int i = 0; i < g_spheres.size(); i++) {
+        Sphere &sphere = g_spheres[i];
+        vec4 sPrime = sphere.inverseTransform * (sphere.position - ray.origin);
+        vec4 cPrime = sphere.inverseTransform * ray.dir;
         
-        // Quadratic equation: |c|^2t^2 + 2(S.tc) + |S|^2 - 1
-        float a = dot(C, C);
-        float b = dot(S, C);
-        float c = dot(S, S) - 1;
+        // |c|^2 t^2 + 2(S.tc) + |S|^2 - 1 = 0
+        //  A              B          C
+        float A = dot(cPrime, cPrime);
+        float B = dot(sPrime, cPrime);
+        float C = dot(sPrime, sPrime) - 1;
         
-        // Solve equation
-        float solution;
-        float discriminant = b * b - a * c; // Value under the root
+        float t; // solution of quadratic eq.
+        float discriminant = B * B - A * C; // Value under the root
         
-        bool interiorPoint = false;
+        bool isInnerPoint = false;
         
-        if (discriminant < 0) {
-            // No solutions: line does not intersect
+        if (discriminant < 0) { // No intersection
             continue;
-        } else if (discriminant == 0) {
-            // Single solution: line intersects at one point
-            solution = b / a;
-        } else {
-            // Two solutions: line intersects at two points
-            float root = sqrtf(discriminant);
-            float solution1 = (b - root) / a;
-            float solution2 = (b + root) / a;
+        } else { // One or two intersections
+            float t1 = (B - sqrtf(discriminant)) / A;
+            float t2 = (B + sqrtf(discriminant)) / A;
             
-            // Use the smallest valid solution
-            solution = fminf(solution1, solution2);
-            if (solution <= MIN_REFLECT_DIST || ((!ray.hasReflected) && solution <= MIN_DIST)) {
-                solution = fmaxf(solution1, solution2);
-                interiorPoint = true;
+            // Find the smaller solution b/c smaller means closer to the screen
+            if(t1 < t2)
+                t = t1;
+            else
+                t = t2;
+            
+            if (t <= MIN_REFLECT_DIST || ((!ray.hasReflected) && t <= MIN_DIST)) {
+                isInnerPoint = true;
+                if(t1 > t2)
+                    t = t1;
+                else
+                    t = t2;
             }
         }
         
         // Validate solution
-        if (solution <= MIN_REFLECT_DIST || ((!ray.hasReflected) && solution <= MIN_DIST)) {
+        if (t <= MIN_REFLECT_DIST || ((!ray.hasReflected) && t <= MIN_DIST)) {
             continue;
         }
         
-        if ((intersection.distance == -1 || solution < intersection.distance)) {
-            intersection.distance = solution;
+        if ((intersection.distance == INITIAL_DISTANCE || t < intersection.distance)) {
+            intersection.distance = t;
             intersection.sphere = &sphere;
-            intersection.interiorPoint = interiorPoint;
+            intersection.isInnerPoint = isInnerPoint;
         }
     }
     
-    // Calculate intersection point and normal
-    if (intersection.distance != -1) {
+    // Intersection point and its normal
+    if (intersection.distance != INITIAL_DISTANCE) {
         ray.hasReflected = true;
         intersection.point = ray.origin + ray.dir * intersection.distance;
         
-        vec4 normal = intersection.point - intersection.sphere->position;
-        // Invert normal for interior points
-        if (intersection.interiorPoint) {
-            normal = -normal;
-        }
+        vec4 normalPrime = intersection.point - intersection.sphere->position; // in sphere's coordinate system
+
+        // Change the direction of normal if the intersection hits the inner side of the sphere
+        if (intersection.isInnerPoint)
+            normalPrime = -normalPrime;
         
-        mat4 trans = transpose(intersection.sphere->inverseTransform);
-        normal = trans * intersection.sphere->inverseTransform * normal;
+        mat4 tran = transpose(intersection.sphere->inverseTransform);
+        vec4 normal = tran * intersection.sphere->inverseTransform * normalPrime;
         normal.w = 0;
         intersection.normal = normalize(normal);
     }
@@ -303,80 +298,82 @@ Intersection getIntersection(Ray& ray)
 // -------------------------------------------------------------------
 // Ray tracing
 
-vec4 checkColor(vec4 color)
+vec4 capColor(vec4 _color)
 {
-    vec4 result = color;
-    if (color.x < 0.0f) { result.x = 0.0f; }
-    if (color.y < 0.0f) { result.y = 0.0f; }
-    if (color.z < 0.0f) { result.z = 0.0f; }
-    if (color.x > 1.0f) { result.x = 1.0f; }
-    if (color.y > 1.0f) { result.y = 1.0f; }
-    if (color.z > 1.0f) { result.z = 1.0f; }
+    vec4 color = _color;
+    if (_color.x < 0.0f)
+        color.x = 0.0f;
+    if (_color.y < 0.0f)
+        color.y = 0.0f;
+    if (_color.z < 0.0f)
+        color.z = 0.0f;
+    if (_color.x > 1.0f)
+        color.x = 1.0f;
+    if (_color.y > 1.0f)
+        color.y = 1.0f;
+    if (_color.z > 1.0f)
+        color.z = 1.0f;
     
-    return result;
+    return color;
 }
 
 
 
 vec4 trace(Ray& ray, int reflectionDepth)
 {
-    // Limit reflection level
-    if (reflectionDepth >= MAX_REFLECTION_DEPTH) {
+    // Return no color if exceed MAX_REFLECTION_DEPTH
+    if (reflectionDepth >= MAX_REFLECTION_DEPTH)
         return vec4();
-    }
     
-    // Get the nearest intersecting sphere
     Intersection intersection = getIntersection(ray);
     
-    if (intersection.distance == -1 && reflectionDepth == 0) {
-        // Return background color if no intersection and is an initial ray
+    if (intersection.distance == INITIAL_DISTANCE && reflectionDepth == 0) { // Primary ray with no intersection
         return g_backgroundColor;
-    } else if (intersection.distance == -1) {
-        // Return no color if no intersection and not an initial ray
-        return vec4();
+    } else if (intersection.distance == INITIAL_DISTANCE) { // Reflected ray with no intersection
+        return vec4(); // no color
     }
     
-    // Calculate initial intersection color with ambient intensity
-    vec4 color = intersection.sphere->color * intersection.sphere->Ka * g_ambient;
-    
-    // Calculate Blinn-Phong shading from light sources
+    vec4 ambient = intersection.sphere->color * intersection.sphere->Ka * g_ambient;
     vec4 diffusion = vec4(0, 0, 0, 0);
     vec4 specular = vec4(0, 0, 0, 0);
-    for (Light light : g_lights) {
-        // Generate ray from intersection point to light
-        Ray lightRay;
-        lightRay.origin = intersection.point;
-        lightRay.dir = normalize(light.position - intersection.point);
+    
+    for (int i = 0; i < g_lights.size(); i++) {
+        Light light = g_lights[i];
+        // The ray is from intersection point to light
+        Ray reflectedLightRay;
+        reflectedLightRay.origin = intersection.point;
+        reflectedLightRay.dir = normalize(light.position - intersection.point);
         
-        // Determine if the light source is not obstructed
-        Intersection lightIntersection = getIntersection(lightRay);
-        if (lightIntersection.distance == -1) {
-            // Calculate the intensity of diffuse light
-            float diffusionIntensity = dot(intersection.normal, lightRay.dir);
-            if (diffusionIntensity > 0) {
-                diffusion += diffusionIntensity * light.color * intersection.sphere->color;
+        // Check if the light source is blocked or not
+        Intersection shadow = getIntersection(reflectedLightRay);
+        
+        if (shadow.distance == INITIAL_DISTANCE) { // Non-blocked light
+            // Diffusion intensity
+            float diffuseInt = dot(intersection.normal, reflectedLightRay.dir);
+            
+            if (diffuseInt > 0) {
+                diffusion += diffuseInt * light.color * intersection.sphere->color;
                 
-                // Calculate the half vector between light vector and the view vector
-                vec4 H = normalize(lightRay.dir - ray.dir);
-                
-                // Calculate the intensity of specular light
-                float specularIntensity = dot(intersection.normal, H);
-                specular += powf(powf(specularIntensity, intersection.sphere->specularExponent), 3) * light.color;
+                // Half vector between light vector and the view vector, for specular intensity
+                vec4 half = normalize(reflectedLightRay.dir - ray.dir);
+                float specularInt = dot(intersection.normal, half);
+                specular += powf(powf(specularInt, intersection.sphere->specularExponent), 4) * light.color;
             }
         }
     }
     
-    // Apply diffusion and specular values
-    color += diffusion * intersection.sphere->Kd + specular * intersection.sphere->Ks;
-    
-    // Calculate reflections
+    vec4 color_local = ambient + diffusion * intersection.sphere->Kd + specular * intersection.sphere->Ks;
+
+    // Reflections
     Ray reflectRay;
     reflectRay.origin = intersection.point;
     reflectRay.dir = normalize(ray.dir - 2.0f * intersection.normal * dot(intersection.normal, ray.dir));
     reflectionDepth += 1;
-
-    color += trace(reflectRay, reflectionDepth) * intersection.sphere->Kr;
+    vec4 color_reflected = trace(reflectRay, reflectionDepth) * intersection.sphere->Kr;
     
+    // Final color
+    vec4 color = color_local + color_reflected;
+    color = capColor(color);
     return color;
 }
 

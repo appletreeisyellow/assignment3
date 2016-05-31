@@ -29,12 +29,12 @@ struct Sphere
     vec3    scale;
     vec4    color;
     float   Ka,
-            Kd,
-            Ks,
-            Kr,
-            specularExponent;
+    Kd,
+    Ks,
+    Kr,
+    specularExponent;
     mat4    transform,
-            inverseTransform;
+    inverseTransform;
     
     Sphere(string tname, vec4 tposition, vec3 tscale, vec4 tcolor, float tKa, float tKd, float tKs, float tKr, float tspe)
     {
@@ -191,15 +191,15 @@ void loadFile(const char* filename)
         }
         parseLine(vs);
     }
-   /*
-    cout << "g_width " << g_width << endl;
-    cout << "g_height " << g_height << endl;
-    cout << "g_left " << g_left << endl;
-    cout << "g_right " << g_right << endl;
-    cout << "g_top " << g_top << endl;
-    cout << "g_bottom " << g_bottom << endl;
-    cout << "g_near " << g_near << endl;
-    */
+    /*
+     cout << "g_width " << g_width << endl;
+     cout << "g_height " << g_height << endl;
+     cout << "g_left " << g_left << endl;
+     cout << "g_right " << g_right << endl;
+     cout << "g_top " << g_top << endl;
+     cout << "g_bottom " << g_bottom << endl;
+     cout << "g_near " << g_near << endl;
+     */
 }
 
 
@@ -235,7 +235,7 @@ Intersection getIntersection(const Ray& ray)
         Sphere sphere = g_spheres[i];
         vec4 sPrime = sphere.inverseTransform * (sphere.position - ray.origin); // sPrime is in sphere's coordinate system
         vec4 cPrime = sphere.inverseTransform * ray.dir;                        // cPrime is in sphere's coordinate system
-
+        
         
         // |c|^2 t^2 + 2(s tc) + |s|^2 - 1 = 0
         float A = dot(cPrime, cPrime);
@@ -263,7 +263,7 @@ Intersection getIntersection(const Ray& ray)
         else // no intersection
             continue;
         
-      
+        
         //if(t < intersection.distance)
         if( intersection.distance == -1.0 || t < intersection.distance)
         {
@@ -275,7 +275,7 @@ Intersection getIntersection(const Ray& ray)
     
     // calculate the intersection point and its normal
     if(intersection.distance != -1.0f )
-    //if(intersection.distance != MAX_DISTANCE )
+        //if(intersection.distance != MAX_DISTANCE )
     {
         intersection.point = ray.origin + ray.dir * intersection.distance;
         vec4 normalPrime = (intersection.point - intersection.sphere->position);
@@ -295,6 +295,20 @@ Intersection getIntersection(const Ray& ray)
 // -------------------------------------------------------------------
 // Ray tracing
 
+vec4 checkColor(vec4 color)
+{
+    vec4 result = color;
+    if (color.x < 0.0f) { result.x = 0.0f; }
+    if (color.y < 0.0f) { result.y = 0.0f; }
+    if (color.z < 0.0f) { result.z = 0.0f; }
+    if (color.x > 1.0f) { result.x = 1.0f; }
+    if (color.y > 1.0f) { result.y = 1.0f; }
+    if (color.z > 1.0f) { result.z = 1.0f; }
+    
+    return result;
+}
+
+/*
 vec4 trace(const Ray& ray)
 {
     // TODO: implement your ray tracing routine here.
@@ -309,11 +323,11 @@ vec4 trace(const Ray& ray)
     
     //cout << "Distance: " << intersection.distance << "  Is inner point? "<< intersection.isInnerPoint << endl;
     
-    if(intersection.distance == -1.0f && !ray.hasReflected) // primary ray
     //if(intersection.distance == MAX_DISTANCE && !ray.hasReflected) // primary ray
+    if(intersection.distance == -1 && !ray.hasReflected) // primary ray
         return g_backgroundColor;
-    //else if(intersection.distanceFromTheEye == -1)
-    //    return vec4();
+    else if(intersection.distance == -1)
+        return vec4();
     
     // Ambient
     vec4 color = intersection.sphere->color * intersection.sphere->Ka * g_ambient;
@@ -331,7 +345,7 @@ vec4 trace(const Ray& ray)
         // Shadow
         Intersection lightIntersection = getIntersection(lightRay);
         if(lightIntersection.distance == -1.0f)
-        //if(lightIntersection.distance == MAX_DISTANCE)
+            //if(lightIntersection.distance == MAX_DISTANCE)
         {
             // Diffuse
             float diffusionIntensity = dot(intersection.normal, lightRay.dir);
@@ -350,19 +364,75 @@ vec4 trace(const Ray& ray)
     
     // Diffusion and specular values
     color += diffusion * intersection.sphere->Kd + specular * intersection.sphere->Ks;
- /*
     
-    // Reflections
-    Ray reflected_ray;
-    reflected_ray.origin = intersection.point;
-    reflected_ray.dir = normalize(ray.dir - 2.0f * intersection.normal * dot(intersection.normal, ray.dir));
-    reflected_ray.hasReflected = true;
-    vec4 color_reflect = trace(reflected_ray);
-    color += color_reflect * intersection.sphere->Kr;
-     */
+     
+     // Reflections
+     Ray reflected_ray;
+     reflected_ray.origin = intersection.point;
+     reflected_ray.dir = normalize(ray.dir - 2.0f * intersection.normal * dot(intersection.normal, ray.dir));
+     reflected_ray.hasReflected = true;
+     vec4 color_reflect = trace(reflected_ray);
+     color += color_reflect * intersection.sphere->Kr;
+     
+ 
+    
+    return color;
+}*/
+
+
+vec4 trace(const Ray& ray)
+{
+    Intersection intersection = getIntersection(ray);
+    
+    if(intersection.distance == -1 && !ray.hasReflected) // primary ray with no intersection
+        return g_backgroundColor;
+    else if(intersection.distance == -1) // reflected ray with no intersection, no color
+        return vec4();
+    
+    vec4 color_local;
+    vec4 color_reflect;
+    vec4 color;
+    
+    vec4 ambient = g_ambient * intersection.sphere->color * intersection.sphere->Ka;
+    vec4 diffuse = vec4( 0.0f, 0.0f, 0.0f, 0.0f);
+    vec4 specular = vec4( 0.0f, 0.0f, 0.0f, 0.0f);
+    
+    for(int i = 0; i < g_lights.size(); i++)
+    {
+        Light light = g_lights[i];
+        Ray lightRay;
+        lightRay.origin = intersection.point;
+        lightRay.dir = normalize(light.position - intersection.point);
+        
+        // Determine if the light source is not obstructed
+        Intersection lightIntersection = getIntersection(lightRay);
+        if (lightIntersection.distance == -1) {
+            // Calculate the intensity of diffuse light
+            float diffusionIntensity = dot(intersection.normal, lightRay.dir);
+            if (diffusionIntensity > 0) {
+                diffuse += diffusionIntensity * light.color * intersection.sphere->color;
+                
+                // Calculate the half vector between light vector and the view vector
+                vec4 H = normalize(lightRay.dir - ray.dir);
+                
+                // Calculate the intensity of specular light
+                float specularIntensity = dot(intersection.normal, H);
+                specular += powf(powf(specularIntensity, intersection.sphere->specularExponent), 3) * light.color;
+            }
+        }
+    
+    }
+    
+    color_local = ambient + diffuse * intersection.sphere->Kd + specular * intersection.sphere->Ks;;
+    
+    color = color_local;
+    
+    // cap color
+    color = checkColor(color);
     
     return color;
 }
+
 
 vec4 getDir(int ix, int iy)
 {
@@ -403,11 +473,11 @@ void render()
 // -------------------------------------------------------------------
 // PPM saving
 
-void savePPM(int Width, int Height, char* fname, unsigned char* pixels) 
+void savePPM(int Width, int Height, char* fname, unsigned char* pixels)
 {
     FILE *fp;
     const int maxVal=255;
-
+    
     printf("Saving image %s: %d x %d\n", fname, Width, Height);
     fp = fopen(fname,"wb");
     if (!fp) {
@@ -417,11 +487,11 @@ void savePPM(int Width, int Height, char* fname, unsigned char* pixels)
     fprintf(fp, "P6\n");
     fprintf(fp, "%d %d\n", Width, Height);
     fprintf(fp, "%d\n", maxVal);
-
+    
     for(int j = 0; j < Height; j++) {
         fwrite(&pixels[j*Width*3], 3, Width, fp);
     }
-
+    
     fclose(fp);
 }
 
@@ -446,7 +516,7 @@ void saveFile()
                 float clampedValue = clamp(((float*)g_colors[y*g_width+x])[i]);
                 buf[y*g_width*3+x*3+i] = (unsigned char)(clampedValue * 255.9f);
             }
-
+    
     // Change file name based on input file name.
     savePPM(g_width, g_height, g_outPutFileName, buf);
     delete[] buf;
@@ -466,6 +536,5 @@ int main(int argc, char* argv[])
     loadFile(argv[1]);
     render();
     saveFile();
-	return 0;
+    return 0;
 }
-

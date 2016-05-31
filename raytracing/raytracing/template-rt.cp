@@ -38,6 +38,7 @@ struct Sphere
     specularExponent;
     mat4    transform,
     inverseTransform;
+    Sphere() {}
     
     Sphere(string tname, vec4 tposition, vec3 tscale, vec4 tcolor, float tKa, float tKd, float tKs, float tKr, float tspe)
     {
@@ -75,8 +76,6 @@ struct Intersection
     float distance;
     vec4 point;
     bool isInnerPoint;
-    Sphere *sphere;
-    vec4 normal;
 };
 
 vector<vec4> g_colors;
@@ -216,19 +215,17 @@ vec3 toVec3(vec4 in)
 // -------------------------------------------------------------------
 // Intersection routine
 
-// TODO: add your ray-sphere intersection routine here.
-Intersection getIntersection(Ray& ray)
+Intersection getIntersection(Ray& ray, Sphere &sphere)
 {
     Intersection intersection;
     intersection.ray = ray;
     intersection.isInnerPoint = false;
-    //intersection.distance = -1;
     intersection.distance = INITIAL_DISTANCE;
     
     for (int i = 0; i < g_spheres.size(); i++) {
-        Sphere &sphere = g_spheres[i];
-        vec4 sPrime = sphere.inverseTransform * (sphere.position - ray.origin);
-        vec4 cPrime = sphere.inverseTransform * ray.dir;
+        Sphere &currentSphere = g_spheres[i];
+        vec4 sPrime = currentSphere.inverseTransform * (currentSphere.position - ray.origin);
+        vec4 cPrime = currentSphere.inverseTransform * ray.dir;
         
         // |c|^2 t^2 + 2(S.tc) + |S|^2 - 1 = 0
         //  A              B          C
@@ -269,26 +266,15 @@ Intersection getIntersection(Ray& ray)
         
         if ((intersection.distance == INITIAL_DISTANCE || t < intersection.distance)) {
             intersection.distance = t;
-            intersection.sphere = &sphere;
+            sphere = g_spheres[i];
             intersection.isInnerPoint = isInnerPoint;
         }
     }
     
-    // Intersection point and its normal
+    // Intersection point
     if (intersection.distance != INITIAL_DISTANCE) {
         ray.hasReflected = true;
         intersection.point = ray.origin + ray.dir * intersection.distance;
-        
-        vec4 normalPrime = intersection.point - intersection.sphere->position; // in sphere's coordinate system
-
-        // Change the direction of normal if the intersection hits the inner side of the sphere
-        if (intersection.isInnerPoint)
-            normalPrime = -normalPrime;
-        
-        mat4 tran = transpose(intersection.sphere->inverseTransform);
-        vec4 normal = tran * intersection.sphere->inverseTransform * normalPrime;
-        normal.w = 0;
-        intersection.normal = normalize(normal);
     }
     
     return intersection;
@@ -325,7 +311,9 @@ vec4 trace(Ray& ray, int reflectionDepth)
     if (reflectionDepth >= MAX_REFLECTION_DEPTH)
         return vec4();
     
-    Intersection intersection = getIntersection(ray);
+    // Find the intersection and the sphere that blocks the ray
+    Sphere sphere;
+    Intersection intersection = getIntersection(ray, sphere);
     
     if (intersection.distance == INITIAL_DISTANCE && reflectionDepth == 0) { // Primary ray with no intersection
         return g_backgroundColor;
@@ -333,7 +321,21 @@ vec4 trace(Ray& ray, int reflectionDepth)
         return vec4(); // no color
     }
     
-    vec4 ambient = intersection.sphere->color * intersection.sphere->Ka * g_ambient;
+    // Find Normal
+    vec4 normalPrime = intersection.point - sphere.position; // in sphere's coordinate system
+    
+    // Change the direction of normal if the intersection hits the inner side of the sphere
+    if (intersection.isInnerPoint)
+        normalPrime = -normalPrime;
+    
+    mat4 tran = transpose(sphere.inverseTransform);
+    vec4 normal = tran * sphere.inverseTransform * normalPrime;
+    normal.w = 0;
+    normal = normalize(normal);
+    
+    
+    // Local color
+    vec4 ambient = sphere.color * sphere.Ka * g_ambient;
     vec4 diffusion = vec4(0, 0, 0, 0);
     vec4 specular = vec4(0, 0, 0, 0);
     
@@ -345,31 +347,32 @@ vec4 trace(Ray& ray, int reflectionDepth)
         reflectedLightRay.dir = normalize(light.position - intersection.point);
         
         // Check if the light source is blocked or not
-        Intersection shadow = getIntersection(reflectedLightRay);
+        Sphere theBlokingSphere;
+        Intersection shadow = getIntersection(reflectedLightRay, theBlokingSphere);
         
         if (shadow.distance == INITIAL_DISTANCE) { // Non-blocked light
             // Diffusion intensity
-            float diffuseInt = dot(intersection.normal, reflectedLightRay.dir);
+            float diffuseInt = dot(normal, reflectedLightRay.dir);
             
             if (diffuseInt > 0) {
-                diffusion += diffuseInt * light.color * intersection.sphere->color;
+                diffusion += diffuseInt * light.color * sphere.color;
                 
                 // Half vector between light vector and the view vector, for specular intensity
                 vec4 half = normalize(reflectedLightRay.dir - ray.dir);
-                float specularInt = dot(intersection.normal, half);
-                specular += powf(powf(specularInt, intersection.sphere->specularExponent), 4) * light.color;
+                float specularInt = dot(normal, half);
+                specular += powf(powf(specularInt, sphere.specularExponent), 4) * light.color;
             }
         }
     }
     
-    vec4 color_local = ambient + diffusion * intersection.sphere->Kd + specular * intersection.sphere->Ks;
+    vec4 color_local = ambient + diffusion * sphere.Kd + specular * sphere.Ks;
 
     // Reflections
     Ray reflectRay;
     reflectRay.origin = intersection.point;
-    reflectRay.dir = normalize(ray.dir - 2.0f * intersection.normal * dot(intersection.normal, ray.dir));
+    reflectRay.dir = normalize(ray.dir - 2.0f * normal * dot(normal, ray.dir));
     reflectionDepth += 1;
-    vec4 color_reflected = trace(reflectRay, reflectionDepth) * intersection.sphere->Kr;
+    vec4 color_reflected = trace(reflectRay, reflectionDepth) * sphere.Kr;
     
     // Final color
     vec4 color = color_local + color_reflected;
@@ -380,20 +383,12 @@ vec4 trace(Ray& ray, int reflectionDepth)
 
 vec4 getDir(int ix, int iy)
 {
-    // This should return the direction from the origin
-    // to pixel (ix, iy), normalized.
-    
     float alpha = (float) ix / g_width;
     float beta = (float) iy / g_height;
-    
     float x = (1.0f - alpha) * g_left + alpha * g_right;
     float y = (1.0f - beta) * g_bottom + beta * g_top;
     
-    //cout << "x " << x << "   y " << y << endl;
-    
-    vec4 dir;
-    dir = vec4(x, y, -g_near, 0.0f);
-    return dir;
+    return vec4(x, y, -g_near, 0.0f);
 }
 
 void renderPixel(int ix, int iy)

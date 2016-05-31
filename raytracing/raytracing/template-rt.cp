@@ -72,7 +72,6 @@ struct Light
 
 struct Intersection
 {
-    Ray ray;
     float distance;
     vec4 point;
     bool isInnerPoint;
@@ -218,7 +217,6 @@ vec3 toVec3(vec4 in)
 Intersection getIntersection(Ray& ray, Sphere &sphere)
 {
     Intersection intersection;
-    intersection.ray = ray;
     intersection.isInnerPoint = false;
     intersection.distance = INITIAL_DISTANCE;
     
@@ -324,25 +322,22 @@ vec4 trace(Ray& ray, int reflectionDepth)
     // Find Normal
     vec4 normalPrime = intersection.point - sphere.position; // in sphere's coordinate system
     
-    // Change the direction of normal if the intersection hits the inner side of the sphere
-    if (intersection.isInnerPoint)
+    if (intersection.isInnerPoint) // Change the direction of normal if the intersection hits the inner side of the sphere
         normalPrime = -normalPrime;
     
-    mat4 tran = transpose(sphere.inverseTransform);
-    vec4 normal = tran * sphere.inverseTransform * normalPrime;
+    vec4 normal = transpose(sphere.inverseTransform) * sphere.inverseTransform * normalPrime;
     normal.w = 0;
     normal = normalize(normal);
     
-    
     // Local color
     vec4 ambient = sphere.color * sphere.Ka * g_ambient;
-    vec4 diffusion = vec4(0, 0, 0, 0);
-    vec4 specular = vec4(0, 0, 0, 0);
+    vec4 diffusion = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    vec4 specular = vec4(0.0f, 0.0f, 0.0f, 0.0f);
     
     for (int i = 0; i < g_lights.size(); i++) {
         Light light = g_lights[i];
-        // The ray is from intersection point to light
-        Ray reflectedLightRay;
+        
+        Ray reflectedLightRay; // From intersection point to light
         reflectedLightRay.origin = intersection.point;
         reflectedLightRay.dir = normalize(light.position - intersection.point);
         
@@ -357,7 +352,7 @@ vec4 trace(Ray& ray, int reflectionDepth)
             if (diffuseInt > 0) {
                 diffusion += diffuseInt * light.color * sphere.color;
                 
-                // Half vector between light vector and the view vector, for specular intensity
+                // Specular intensity. Half vector between light vector and the view vector
                 vec4 half = normalize(reflectedLightRay.dir - ray.dir);
                 float specularInt = dot(normal, half);
                 specular += powf(powf(specularInt, sphere.specularExponent), 4) * light.color;

@@ -49,7 +49,6 @@ struct Sphere
         specularExponent = tspe;
         transform = Translate(position) * Scale(scale);
         InvertMatrix(Scale(scale), inverseTransform);
-        //InvertMatrix(transform, inverseTransform);
     }
 };
 
@@ -192,6 +191,15 @@ void loadFile(const char* filename)
         }
         parseLine(vs);
     }
+   /*
+    cout << "g_width " << g_width << endl;
+    cout << "g_height " << g_height << endl;
+    cout << "g_left " << g_left << endl;
+    cout << "g_right " << g_right << endl;
+    cout << "g_top " << g_top << endl;
+    cout << "g_bottom " << g_bottom << endl;
+    cout << "g_near " << g_near << endl;
+    */
 }
 
 
@@ -227,15 +235,14 @@ Intersection getIntersection(const Ray& ray)
         Sphere sphere = g_spheres[i];
         vec4 sPrime = sphere.inverseTransform * (sphere.position - ray.origin); // sPrime is in sphere's coordinate system
         vec4 cPrime = sphere.inverseTransform * ray.dir;                        // cPrime is in sphere's coordinate system
-        //vec4 sPrime = toVec3(sphere.inverseTransform * ray.origin);                     // sPrime is in sphere's coordinate system
-        //vec4 cPrime = toVec3(sphere.inverseTransform * ray.dir);                        // cPrime is in sphere's coordinate system
+
         
         // |c|^2 t^2 + 2(s tc) + |s|^2 - 1 = 0
         float A = dot(cPrime, cPrime);
         float B = dot(sPrime, cPrime);
         float C = dot(sPrime, sPrime) - 1;
         
-        float t = 10001.0f; // t = the solution to find intersection point
+        float t; // t = the solution to find intersection point
         float discriminant = B * B - A * C;
         bool isInnerPoint = false;
         
@@ -245,8 +252,9 @@ Intersection getIntersection(const Ray& ray)
             float t2 = - B / A + sqrt(discriminant) / A;
             
             t = fminf(t1, t2);
-
-            if((!ray.hasReflected && t < MIN_DIST) || (ray.hasReflected && t < MIN_REFLECT_DIST))
+            
+            // Minimun acceptable distance
+            if((ray.hasReflected && t < MIN_REFLECT_DIST) || (!ray.hasReflected && t < MIN_DIST))
             {
                 t = fmaxf(t1, t2);
                 isInnerPoint = true;
@@ -255,6 +263,7 @@ Intersection getIntersection(const Ray& ray)
         else // no intersection
             continue;
         
+      
         //if(t < intersection.distance)
         if( intersection.distance == -1.0 || t < intersection.distance)
         {
@@ -269,7 +278,7 @@ Intersection getIntersection(const Ray& ray)
     //if(intersection.distance != MAX_DISTANCE )
     {
         intersection.point = ray.origin + ray.dir * intersection.distance;
-        vec4 normalPrime = normalize(intersection.point - intersection.sphere->position);
+        vec4 normalPrime = (intersection.point - intersection.sphere->position);
         if(intersection.isInnerPoint)
             normalPrime = -normalPrime;
         mat4 tran = transpose(intersection.sphere->inverseTransform);
@@ -364,7 +373,9 @@ vec4 getDir(int ix, int iy)
     float beta = (float) iy / g_height;
     
     float x = (1.0f - alpha) * g_left + alpha * g_right;
-    float y = (1.0f - beta) * g_top + beta * g_bottom;
+    float y = (1.0f - beta) * g_bottom + beta * g_top;
+    
+    //cout << "x " << x << "   y " << y << endl;
     
     vec4 dir;
     dir = vec4(x, y, -g_near, 0.0f);
